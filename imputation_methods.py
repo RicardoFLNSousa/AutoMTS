@@ -50,6 +50,8 @@ def impute_missing_values(df, sensorDict, imputationMethodMode, randomSeed):
         imputeMethod = sensorDict[sensor][0]
         parameters = sensorDict[sensor][1]
         
+        #print("SENSOR", sensor)
+        #print("IMPUTMETHOD", imputeMethod)
         
         
         if(imputationMethodMode == 'default'):
@@ -70,6 +72,8 @@ def impute_missing_values(df, sensorDict, imputationMethodMode, randomSeed):
             	reconstructedData = nocb(df.copy(), [], sensor)
             elif(imputeMethod == 'Moving average'):
             	reconstructedData = moving_average(df.copy(), parameters, sensor)
+            elif(imputeMethod == 'Multiple moving average'):
+                reconstructedData = multiple_moving_average(df.copy(), parameters, sensor)
             elif(imputeMethod == 'Flexible moving average'):
                 reconstructedData = flexible_moving_average(df.copy(), parameters, sensor)
             elif(imputeMethod == 'Random forests'):
@@ -144,6 +148,13 @@ def nocb(df, parameters, sensor):
 def moving_average(df, parameters, sensor):
     df[sensor] = df[sensor].rolling(window = parameters[0], min_periods = parameters[1], center = parameters[2]).mean()
     #df[sensor] = df[sensor].rolling(window = parameters[0], min_periods = parameters[1], center = False).mean()
+    return df
+
+# impute missing values with moving average (arithmetic smoothing) method
+def multiple_moving_average(df, parameters, sensor):
+    while(df[sensor].isnull().values.any()):
+       df[sensor] = df[sensor].rolling(window = parameters[0], min_periods = parameters[1], center = parameters[2]).mean()
+       #df[sensor] = df[sensor].rolling(window = parameters[0], min_periods = parameters[1], center = False).mean()
     return df
 
 # impute missing values with flexible moving average method where the window size expands if there are only missing values

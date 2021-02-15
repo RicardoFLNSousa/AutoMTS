@@ -26,8 +26,10 @@ def get_series_plot(series,title, missingSeries, figType):
                                      dict(stepmode='backward',step='hour',count=12,label='12 Horas',visible=True),
                                      dict(count=1,stepmode='backward',step='day',label='1 Dia',visible=True),
                                      dict(count=3,stepmode='backward',step='day',label='3 Dias',visible=True)])))))
+
     return fig
 
+'''
 def add_predictor_series(fig, predictor):
     for var in predictor.variables:
         fig.append_trace(go.Scatter(name='Model['+var+']', x=predictor.index, yaxis='y1', y=predictor.series[var]["model"], mode='lines'),1,1)
@@ -43,7 +45,7 @@ def add_anomalies(fig, series, predictor):
         anomalies[upperpositions] = series[var].values[upperpositions]
         fig.append_trace({'x':series.index, 'y':anomalies, 'yaxis':'y1', 'mode':'markers', 'name':'Anomalias['+var+']'},1,1)
         fig.update_traces(marker=dict(size=12,line=dict(width=2,color='DarkSlateGrey')),selector=dict(mode='markers'))
-
+'''
 def get_null_plot(message=None):
     title='parameterize and click <b>run</b> to visualize'
     if message is not None: title=message

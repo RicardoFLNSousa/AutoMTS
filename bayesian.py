@@ -109,7 +109,7 @@ def hyperopt(paramHyperopt, df, dfWithMissing, indexNA, numEval, sensor, method)
             dfImputed = imputation_methods.amelia(dfWithMissing, [params['m'], params['autopri'], params['max.resample'], params['norm']], sensor)
         
 
-        mse, rmse, mae, smape = evaluation.evaluate_singular(df.copy(), dfImputed, dfWithMissing, indexNA)
+        mse, rmse, mae, smape = evaluation.evaluate_singular(df.copy(), dfImputed, dfWithMissing, indexNA, sensor)
         
         #print("RMSE", rmse)
         return {'loss': rmse, 'status': STATUS_OK}
@@ -247,7 +247,7 @@ def hyperparameter_tuning_bayesian(df, imputationEvaluationSettings, methods):
                 warnings.simplefilter("ignore")
                 dfImputed = imputation_methods.impute_missing_values(dfWithMissing.copy(), fakeSensorDict, 'None', randomState)
 
-            mse, rmse, mae, smape = evaluation.evaluate_singular(df.copy(), dfImputed, dfWithMissing, indexNA)
+            mse, rmse, mae, smape = evaluation.evaluate_singular(df.copy(), dfImputed, dfWithMissing, indexNA, sensor)
             #print("RMSE", rmse)
             if(rmse < bestMethodRMSE):
                 bestMethodRMSE = rmse

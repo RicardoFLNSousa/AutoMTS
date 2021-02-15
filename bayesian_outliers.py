@@ -40,7 +40,7 @@ def hyperopt(paramHyperopt, df, dfWithOutliers, numEval, sensor, method):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 #print("DF WITH OUTLIERS ISOLATION FORESTS", dfWithOutliers)
-                reconstructedDataFinal, reconstructedDataFinalNan = outlier_detection_methods.isolation_forest(dfWithOutliers.copy(), [params['n_estimators'], params['max_features']], sensor)
+                reconstructedDataFinal, reconstructedDataFinalNan = outlier_detection_methods.isolation_forest(dfWithOutliers.copy(), [params['n_estimators'], params['max_features'], 0], sensor)
             #print("SAI ISOLATION FORESTS")
             
         elif(method == 'Local outlier factor'):

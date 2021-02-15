@@ -19,6 +19,8 @@ import flask
 from urllib.parse import quote as urlquote
 import warnings
 from scipy import integrate
+from datetime import datetime
+import time
 
 from statsmodels.tsa.seasonal import seasonal_decompose
 
@@ -31,7 +33,7 @@ pagetitle = 'WISDOM'
 imputationMethods = ['All', 'Mean', 'Median', 'Random sample', 'Interpolation', 'Locf', 'Nocb', 'Moving average', 'Flexible moving average',
                      'Random forests', 'Expectation maximization', 'Knn', 'Mice','Amelia']
 
-imputationMethods = ['All', 'Mean', 'Median', 'Random sample', 'Interpolation', 'Locf', 'Nocb', 'Moving average', 
+imputationMethods = ['All', 'Mean', 'Median', 'Random sample', 'Interpolation', 'Locf', 'Nocb', 'Moving average', 'Multiple moving average',
                      'Random forests', 'Expectation maximization', 'Knn', 'Mice','Amelia']
 
 outlierDetectionMethods = ['All', 'Standard deviation', 'Inter quartile range', 'Isolation forests', 'Local outlier factor',
@@ -40,7 +42,6 @@ outlierDetectionMethods = ['All', 'Standard deviation', 'Inter quartile range', 
 target_options = [
         #('warning',None,gui.Button.dialog),
         ('upload',None,gui.Button.upload),
-        ('sensor_type',["all"],gui.Button.multidrop,["all"]), 
         ('sensor_name',["all"],gui.Button.multidrop,["all"]), 
         ('period',['2018-01-01','2018-10-11'],gui.Button.daterange),
         ('calendar',list(gui.calendar.keys())+list(gui.week_days.keys()),gui.Button.multidrop,['all']),
@@ -52,18 +53,20 @@ processing_parameters = [
         ('imputation_method', imputationMethods, gui.Button.unidrop, 'Mean'), 
         ('imputation_parameterization','<parameters here>',gui.Button.input),
         ('imputation_evaluation_settings','NAPercent=0.05,NAType=punctual,NAPeriod=2,NumSensor=all,SameSensorNA=False',gui.Button.input), 
-        ('imputation_evaluation_metrics',["all", "mse", 'rmse', 'mae', 'smape'],gui.Button.multidrop,["all", "mse", 'rmse', 'mae', 'smape']),
         ('outliers_method_mode',['default','parametric','fully_automatic'],gui.Button.radio,'default'),
         ('outliers_mode',['point','subsequence'],gui.Button.checkbox),
         ('outliers_method', outlierDetectionMethods, gui.Button.unidrop, 'Standard deviation'), 
         ('outliers_parameterization','<parameters here>',gui.Button.input), 
         ('outliers_evaluation_settings','OutlierPercent=0.05,OutlierType=punctual,OutlierPeriod=2,NumSensor=all,SameSensorOutlier=False',gui.Button.input)]
 
-parameters = [('Target time series',28,target_options),('Processing options',28,processing_parameters)]
+parameters = [('Target time series',26,target_options),('Processing options',27,processing_parameters)]
 charts = [('output_files_missing_values',gui.get_null_label(),gui.Button.html,True),
           ('output_files_outliers',gui.get_null_label(),gui.Button.html,True),
+          ('pre_processed_output_file',gui.get_null_label(),gui.Button.html,True),
           ('statistics_report','Select parameters and run...',gui.Button.text),
-          ('visualization_missing_values',None,gui.Button.figure), ('visualization_outliers',None,gui.Button.figure)]
+          ('visualization_outliers',None,gui.Button.figure),
+          ('outlier_selection', ["all"], gui.Button.multidrop,["all"]),
+          ('visualization_missing_values',None,gui.Button.figure)]
 
 layout = gui.get_layout(pagetitle,parameters,charts)
 
@@ -88,6 +91,7 @@ methodsParamNames = {'Mean' : ['Non Parametric Method'],
                      'Locf' : ['Non Parametric Method'], 
                      'Nocb' : ['Non Parametric Method'],
                      'Moving average' : ['window', 'min_periods', 'center'],
+                     'Multiple moving average' : ['window', 'min_periods', 'center'],
                      'Flexible moving average' : ['window'],
                      'Random forests' : ['max_iter', 'n_estimators', 'min_samples_split', 'min_samples_leaf'],
                      'Expectation maximization' : ['loops'],
@@ -226,7 +230,7 @@ def create_statistics_text_missings(imputationSensorsDict, timeSeriesToEval, dfW
         sensorMethodParams = imputationSensorsDict[sensor][1]
         sensorMethodsParamNames = methodsParamNames[sensorMethod]
         index = dfWithMissing.loc[dfWithMissing[sensor].isna(), :].index
-        mse, rmse,mae, smape = evaluation.evaluate_singular(timeSeriesToEval.copy(), dfMissingImputed.copy(), dfWithMissing.copy(), index)
+        mse, rmse,mae, smape = evaluation.evaluate_singular(timeSeriesToEval.copy(), dfMissingImputed.copy(), dfWithMissing.copy(), index, sensor)
         text += 'The sensor ' + sensor + ' was imputed with the method ' + sensorMethod + ' with a RMSE of ' + str(rmse) + ' and with the following parameters:\n '
         print("SENSORMETHODPARAMS", sensorMethodParams)
         if(sensorMethodParams is None or not sensorMethodParams):
@@ -249,6 +253,106 @@ def integration_func(data):
     #print("data", data)
     
     return  integrate.simps(data) 
+
+# detect duplicates on the data and deal with them
+def detect_duplicates(df):
+    
+    # remove this after testing from here
+    x = df.iloc[:10]
+    idxList = x.index.tolist()
+    idxList[5] = idxList[6]
+    x.index = idxList
+    # to here
+    
+    # detect all the duplicates indexes in the dataframe (the duplicates values are True in the duplicates list)
+    duplicates = x.index.duplicated()
+    
+    # create a dataframe with no duplicates
+    dfFinalDuplicatesImputed = x[~x.index.duplicated(keep='first')]
+    # print("X", x)
+    # print("Duplicate", duplicates)
+    # print("DROP DUPLICATES", dfFinalDuplicatesImputed)
+    
+    # loop over all duplicates
+    for i in range(len(duplicates)):
+        if(duplicates[i]):
+            # get the true index of the duplicate
+            index = x.index[i]
+            # turn the row which had duplicates into nan to be imputed as a missing value
+            dfFinalDuplicatesImputed.loc[index, :] = np.nan
+            # get all the rows with the duplicate (to be compared with the imputed dataframe dfFinalDuplicatesImputed)
+            duplicateRows = x.loc[index]
+            # print("INDEX", index)
+            # print("VALUES", duplicateRows, duplicateRows.iloc[0], duplicateRows.columns)#duplicateRows.iloc[df.index[0],'Pressão Máx.'])
+            # print("dfFinalDuplicatesImputedPREIMPUTATION", dfFinalDuplicatesImputed)
+            
+            for sensor in dfFinalDuplicatesImputed.columns:
+                # print("SENSOR-------------", sensor)
+                dfFinalDuplicatesImputed = imputation_methods.interpolation_method(dfFinalDuplicatesImputed.copy(),['linear'], sensor)
+                bestRow = 0
+                minDif = np.inf
+                
+                for row in range(len(duplicateRows)):
+                    duplicatedRowValue = duplicateRows.iloc[row, duplicateRows.columns.get_loc(sensor)]
+                    # print("DUPLICATE ROWS VALUE", duplicatedRowValue)
+                    imputedValue = dfFinalDuplicatesImputed.loc[index,sensor]
+                    # print("IMPUTED VALUE", imputedValue)
+                    
+                    dif = abs(duplicatedRowValue-imputedValue)
+                    # print("DIF", dif)
+                    if(minDif>dif): 
+                        minDif = dif
+                        bestRow = row
+                
+                dfFinalDuplicatesImputed.loc[index,sensor] = duplicateRows.iloc[bestRow, duplicateRows.columns.get_loc(sensor)]
+                    
+                    
+                
+                
+            print("dfFinalDuplicatesImputedAFTERIMPUTATION", dfFinalDuplicatesImputed)
+            #values
+            
+            
+            
+    
+    return dfFinalDuplicatesImputed
+
+# update the options on the dropdown menu "Outlier selection"
+def update_outlier_selection_multidrop(outlierSelectionDf):
+    indexes = outlierSelectionDf.index
+    sensors = outlierSelectionDf.columns
+    if(indexes is not None):
+        # default multidrop values
+        outlierSelectionValue = ['all']
+        outlierSelectionOptions = [{'value': 'all', 'label': 'All'}]
+        
+        # for all detected outliers in the data, add for the multidrop options
+        for index in indexes:
+            for sensor in sensors:
+            #if(index not in outlierSelectionValue):
+                #selectedSensorsValue.append(sensor)
+                #print("HIHI",outlierSelectionDf.loc[index,sensor])
+                if(pd.isnull(outlierSelectionDf.loc[index,sensor])):
+                    value = str(index) + ' & ' + sensor
+                    outlierSelectionOptions.append({'value': value, 'label': value})
+
+        return outlierSelectionValue, outlierSelectionOptions
+
+    else: return ['all'], [{'value': 'all', 'label': 'All'}]
+
+
+def remove_out_limits_observations(df):
+    # get the gross errors limiters
+    limitsGrossErrors = df.iloc[2,2:]
+    df = df.iloc[3:]
+    for sensor in limitsGrossErrors.index:
+        if(not isinstance(limitsGrossErrors[sensor], float)):
+            lowerLimit = float(limitsGrossErrors[sensor].split('-')[0])
+            upperLimit = float(limitsGrossErrors[sensor].split('-')[1])
+            df.loc[df[sensor] < lowerLimit, sensor] = np.nan
+            df.loc[df[sensor] > upperLimit, sensor] = np.nan
+    
+    return df
 
 ##############################
 ## Callbacks on file upload ##
@@ -277,17 +381,24 @@ def upload_file(contents, fileName):
             # get the original columns names from the excell file
             df.columns = df.iloc[1, :].tolist() 
             
+            # filter the df with the limitGrossErrors
+            df = remove_out_limits_observations(df)
+            
+            
             #remove the initial trash rows
-            df = df.iloc[3:] 
+            #df = df.iloc[3:] 
             df = add_time_on_columns(df)
             # use the DateTime column has index, with the format YYYY-mm-dd HH:MM:SS
             df.index = pd.to_datetime(df['DateTime'], format='%d/%m/%Y %H:%M:%S') 
             
             #remove the initial trash columns including the original and new datetimes
             #df = df.iloc[:, 3:]
-            df = df.iloc[:672, 9:15]
+            df = df.iloc[:672, 9:11]#15]
+    
             print("DF", df)
             
+            #df = detect_duplicates(df.copy())
+            #df = series_utils.generate_missing_rows(df.copy())
             
             isSeriesValid = check_week_period(df, weekPeriod)
             print("O FICHEIRO É VALIDO", isSeriesValid)
@@ -319,6 +430,7 @@ def upload_file(contents, fileName):
             
             d = {'Pressao': pressao.values, 'Caudal': caudal.values}
             newDf = pd.DataFrame(d, index = pressao.index)
+            
             finalDf = newDf.copy()
             finalDf = finalDf.resample('15min').mean()
             
@@ -328,7 +440,7 @@ def upload_file(contents, fileName):
             finalDf['Caudal'] = caudal
             finalDf['Pressao'] = pressao
             
-            finalDf
+            finalDf = series_utils.generate_missing_rows(newDf.copy())
             
             print("finalDf", finalDf)            
             
@@ -493,6 +605,8 @@ def update_imputation_methods_parameters(imputationMethod, mode):
         return 'No parameters available for this method', disable
     elif(imputationMethod == 'Moving average'):
         return 'window=5,min_periods=1,center=False', disable
+    elif(imputationMethod == 'Multiple moving average'):
+        return 'window=5,min_periods=1,center=False', disable
     elif(imputationMethod == 'Flexible moving average'):
         return 'window=3', disable
     elif(imputationMethod == 'Random forests'):
@@ -555,8 +669,10 @@ def serve_traffic_static(fname):
 #################################
 
 @app.callback([Output('output_files_missing_values','children'), Output('output_files_outliers','children'),Output('statistics_report','value'),
-               Output('visualization_missing_values','figure'),Output('visualization_outliers', 'figure')], 
-              [Input('button','n_clicks')],
+               Output('visualization_missing_values','figure'),Output('visualization_outliers', 'figure'), 
+               Output('outlier_selection', 'value'), Output('outlier_selection', 'options'),
+               Output('missing-sensordict-div', 'children'), Output('outlier-sensordict-div', 'children')], 
+              [Input('main_button','n_clicks')],
               [State('dataframe-div', 'children'), State('period', 'start_date'), State('period', 'end_date'),
                State('sensor_name', 'value'), State('calendar', 'value'), State('imputation_method', 'value'),
                State('outliers_method', 'value'), State('imputation_parameterization', 'value'), 
@@ -565,9 +681,13 @@ def serve_traffic_static(fname):
                State('outliers_method_mode', 'value'), State('processing_mode', 'value')])
 
 def update_charts(inp,*args):
+    outlierSelectionValue = ['all']
+    outlierSelectionOptions = [{'value': 'all', 'label': 'All'}]
+    imputationSensorsDict = None
+    outliersSensorsDict = None
     if inp is None: 
         nullplot = plot_utils.get_null_plot()
-        return None, None, ["No information to show"], nullplot, nullplot
+        return None, None, ["No information to show"], nullplot, nullplot, outlierSelectionValue, outlierSelectionOptions, imputationSensorsDict, outliersSensorsDict
     states = dash.callback_context.states
     
     nullplot = plot_utils.get_null_plot()
@@ -582,12 +702,73 @@ def update_charts(inp,*args):
     processingMode = states['processing_mode.value']
     
     '''A: filter series with parameters from GUI'''
-    df = get_data(states)
+    originalDf = get_data(states)
     
     '''Select the data in series with most periods without missing value used to evaluate'''
-    timeSeriesToEval = series_utils.select_time_series_to_eval(df)
+    timeSeriesToEval = series_utils.select_time_series_to_eval(originalDf.copy())
     #pd.set_option('display.max_rows', df.shape[0]+1)
     print("TIMESERIESTOEVAL", timeSeriesToEval)
+    statisticsInfoPanelMissings = ''
+    
+    if('outliers' in  processingMode or len(processingMode)== 0):
+        '''GENERATE ARTIFICIAL OUTLIERS VALUES JUST FOR TESTING -> REMOVE WHEN IT IS DONE'''
+        outliersGenerationSettings = process_parameters([states['outliers_evaluation_settings.value']]) 
+        dfWithOutliers = series_utils.generate_artificial_data(timeSeriesToEval.copy(), outliersGenerationSettings, 'outlier', 0)
+        #print("dfWithOutliers", dfWithOutliers)
+        
+    #    '''detect outliers using the selected outlier detection method'''
+        outliersMethodMode = states['outliers_method_mode.value']
+        outliersMethod = states['outliers_method.value']
+        
+        '''HyperOpt'''
+        if(outliersMethodMode == 'fully_automatic'):
+            outliersSensorsDict = bayesian_outliers.hyperparameter_tuning_bayesian(timeSeriesToEval.copy(), outliersGenerationSettings, outlierDetectionMethods[1:])#outlierDetectionMethods[1:]) #TODO meter todos os metodos outlierDetectionMethods[1:]
+            print("TODO FULLY AUTOMATIC")
+        else:
+            '''Non HyperOpt'''
+            stringOutliersParameters = states['outliers_parameterization.value']
+            outliersParameters = process_parameters([stringOutliersParameters])
+            outliersSensorsDict = dict.fromkeys(originalDf.columns, [outliersMethod, outliersParameters])
+            
+        print("-------------OutliersSensorsDict---------------", outliersSensorsDict)
+        
+        '''evaluate the methods with 30 runs'''
+        fileNameOutliers = evaluation_outliers.evaluate_multiple(timeSeriesToEval.copy(), outliersGenerationSettings, outliersSensorsDict, outliersMethodMode, evalIter)
+        
+        # USADO APENAS NOS TESTES. A DFWITHOUTLIERS FOI GERADA POR NOS
+        #dfDetectedOutliers, dfWithDetectedOutliersToNan = outlier_detection_methods.detect_outliers(dfWithOutliers.copy(), outliersSensorsDict, outliersMethodMode, 0)
+        
+        dfDetectedOutliers, dfWithDetectedOutliersToNan = outlier_detection_methods.detect_outliers(originalDf.copy(), outliersSensorsDict, outliersMethodMode, 0)
+        
+        # example of the evaluate_singular
+        '''
+        for sensor in dfWithOutliers.columns:
+            dfGeneratedWithOutliersIndex = timeSeriesToEval[dfWithOutliers[sensor] != timeSeriesToEval[sensor]].index
+            print("SENSOR", sensor)
+            detectedOutliersIndex = dfWithDetectedOutliersToNan.loc[dfWithDetectedOutliersToNan[sensor].isna(), :].index #indexes that will be used on the evaluation (which are the ones that were detected as outliers)
+            accuracy, precision, recall, f1Score = evaluation_outliers.evaluate_singular(dfWithOutliers[sensor].copy(), dfGeneratedWithOutliersIndex, detectedOutliersIndex)
+            print("SCORES", accuracy, precision, recall, f1Score)
+        '''
+        #print("DETECTED OUTLIERS", dfDetectedOutliers, dfWithDetectedOutliersToNan)
+        
+    #    '''
+    #    outlierDetectionMethod = states['outliers_method.value']
+    #    stringOutlierParameters = states['outliers_parameterization.value']
+    #    outlierParameters = process_parameters(stringOutlierParameters)
+    #    dfOutliers = outlier_detection_methods.detect_outliers(dfWithOutliers.copy(), outlierDetectionMethod, outlierParameters)
+    #    print("dfOutliers", dfOutliers)
+    #    '''
+        figOutliers = plot_utils.get_series_plot(dfWithOutliers,'Outliers Detection', dfDetectedOutliers, 'outliers')
+        childreOutliers = [dcc.Link(fileNameOutliers[10:],href='/tdownloads/'+ fileNameOutliers,refresh=False, target="_blank"),html.Br()]
+        
+        # mask with the detected outliers at true
+        mask = dfWithDetectedOutliersToNan.isna().values
+        # dataframe with the detected outliers only
+        outlierSelectionDf = dfWithDetectedOutliersToNan[mask].drop_duplicates()
+        print("OUTLEIRSELECTIONDF", outlierSelectionDf)
+
+        # get the values to change on the multidrop of outlierselection
+        outlierSelectionValue, outlierSelectionOptions = update_outlier_selection_multidrop(outlierSelectionDf)
     
     if('missings' in processingMode or len(processingMode) == 0):
         
@@ -612,7 +793,7 @@ def update_charts(inp,*args):
             '''Non HyperOpt'''
             stringImputationParameters = states['imputation_parameterization.value']
             imputationParameters = process_parameters([stringImputationParameters])
-            imputationSensorsDict = dict.fromkeys(df.columns, [imputationMethod, imputationParameters])
+            imputationSensorsDict = dict.fromkeys(originalDf.columns, [imputationMethod, imputationParameters])
             
         #print("-------------ImputationSensorsDict---------------", imputationSensorsDict)
             
@@ -622,65 +803,22 @@ def update_charts(inp,*args):
         print("-------------------------FINAAAAAAAAAAAAAAAAAAAAL-----------------------")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            dfMissingImputed = imputation_methods.impute_missing_values(dfWithMissing.copy(), imputationSensorsDict, imputationMethodMode, 0)
-        #pd.set_option('display.max_rows', df.shape[0]+1)
+            # USADO PARA TESTES. DFWITHMISSING FOI GERADA POR NOS
+            #dfMissingImputed = imputation_methods.impute_missing_values(dfWithMissing.copy(), imputationSensorsDict, imputationMethodMode, 0)
+            
+            dfMissingImputed = imputation_methods.impute_missing_values(originalDf.copy(), imputationSensorsDict, imputationMethodMode, 0)
+            
+       #pd.set_option('display.max_rows', df.shape[0]+1)
         #print(dfMissingImputed)
         
         figMissing = plot_utils.get_series_plot(dfMissingImputed,'Missings Imputation', dfWithMissing, 'missings')
         childrenMissing = [dcc.Link(fileNameMissing[10:],href='/tdownloads/'+ fileNameMissing,refresh=False, target="_blank"),html.Br()]
     
+        statisticsInfoPanelMissings = create_statistics_text_missings(imputationSensorsDict, timeSeriesToEval, dfWithMissing, dfMissingImputed, missingGenerationSettings)
 #    
-    if('outliers' in  processingMode or len(processingMode)== 0):
-        '''GENERATE ARTIFICIAL OUTLIERS VALUES JUST FOR TESTING -> REMOVE WHEN IT IS DONE'''
-        outliersGenerationSettings = process_parameters([states['outliers_evaluation_settings.value']]) 
-        dfWithOutliers = series_utils.generate_artificial_data(timeSeriesToEval.copy(), outliersGenerationSettings, 'outlier', 0)
-        #print("dfWithOutliers", dfWithOutliers)
-        
-    #    '''detect outliers using the selected outlier detection method'''
-        outliersMethodMode = states['outliers_method_mode.value']
-        outliersMethod = states['outliers_method.value']
-        
-        '''HyperOpt'''
-        if(outliersMethodMode == 'fully_automatic'):
-            outliersSensorsDict = bayesian_outliers.hyperparameter_tuning_bayesian(timeSeriesToEval.copy(), outliersGenerationSettings, outlierDetectionMethods[1:]) #TODO meter todos os metodos outlierDetectionMethods[1:]
-            print("TODO FULLY AUTOMATIC")
-        else:
-            '''Non HyperOpt'''
-            stringOutliersParameters = states['outliers_parameterization.value']
-            outliersParameters = process_parameters([stringOutliersParameters])
-            outliersSensorsDict = dict.fromkeys(df.columns, [outliersMethod, outliersParameters])
-            
-        print("-------------OutliersSensorsDict---------------", outliersSensorsDict)
-        
-        '''evaluate the methods with 30 runs'''
-        fileNameOutliers = evaluation_outliers.evaluate_multiple(timeSeriesToEval.copy(), outliersGenerationSettings, outliersSensorsDict, outliersMethodMode, evalIter)
-        
-        dfDetectedOutliers, dfWithDetectedOutliersToNan = outlier_detection_methods.detect_outliers(dfWithOutliers.copy(), outliersSensorsDict, outliersMethodMode, 0)
-        
-        
-        # example of the evaluate_singular
-        '''
-        for sensor in dfWithOutliers.columns:
-            dfGeneratedWithOutliersIndex = timeSeriesToEval[dfWithOutliers[sensor] != timeSeriesToEval[sensor]].index
-            print("SENSOR", sensor)
-            detectedOutliersIndex = dfWithDetectedOutliersToNan.loc[dfWithDetectedOutliersToNan[sensor].isna(), :].index #indexes that will be used on the evaluation (which are the ones that were detected as outliers)
-            accuracy, precision, recall, f1Score = evaluation_outliers.evaluate_singular(dfWithOutliers[sensor].copy(), dfGeneratedWithOutliersIndex, detectedOutliersIndex)
-            print("SCORES", accuracy, precision, recall, f1Score)
-        '''
-        #print("DETECTED OUTLIERS", dfDetectedOutliers, dfWithDetectedOutliersToNan)
-        
-    #    '''
-    #    outlierDetectionMethod = states['outliers_method.value']
-    #    stringOutlierParameters = states['outliers_parameterization.value']
-    #    outlierParameters = process_parameters(stringOutlierParameters)
-    #    dfOutliers = outlier_detection_methods.detect_outliers(dfWithOutliers.copy(), outlierDetectionMethod, outlierParameters)
-    #    print("dfOutliers", dfOutliers)
-    #    '''
-        figOutliers = plot_utils.get_series_plot(dfWithOutliers,'Outliers Detection', dfDetectedOutliers, 'outliers')
-        childreOutliers = [dcc.Link(fileNameOutliers[10:],href='/tdownloads/'+ fileNameOutliers,refresh=False, target="_blank"),html.Br()]
     
-#    
-#    statisticsInfoPanelMissings = create_statistics_text_missings(imputationSensorsDict, timeSeriesToEval, dfWithMissing, dfMissingImputed, missingGenerationSettings)
+#       
+    
 #    
 #    '''C: Plot time series'''
 #    
@@ -694,7 +832,89 @@ def update_charts(inp,*args):
 #    #return fig, corr
 #    return childrenMissing, [statisticsInfoPanelMissings], figMissing, figOutliers
 
-    return childrenMissing, childreOutliers, ["No information to show"], figMissing, figOutliers
+
+    return childrenMissing, childreOutliers, statisticsInfoPanelMissings, figMissing, figOutliers, outlierSelectionValue, outlierSelectionOptions, imputationSensorsDict, outliersSensorsDict
+
+
+@app.callback([Output('pre_processed_output_file','children')], 
+              [Input('final_button','n_clicks')],
+              [State('missing-sensordict-div', 'children'), State('outlier-sensordict-div', 'children'), 
+               State('dataframe-div', 'children'),
+               State('period', 'start_date'), State('period', 'end_date'),
+               State('sensor_name', 'value'), State('calendar', 'value'), State('imputation_method', 'value'),
+               State('outliers_method', 'value'), State('imputation_parameterization', 'value'), 
+               State('outliers_parameterization', 'value'), State('imputation_evaluation_settings', 'value'),
+               State('imputation_method_mode', 'value'), State('outliers_evaluation_settings', 'value'),
+               State('outliers_method_mode', 'value'), State('processing_mode', 'value'),
+               State('outlier_selection', 'value'), State('outlier_selection', 'options')])
+
+def remove_outliers_and_generate(inp,*args):
+    if inp is None: 
+        return [None]
+    
+    states = dash.callback_context.states
+    originalDf = get_data(states)
+    print("ORIGINAL DF", originalDf)
+
+    
+    outlierSelectionValue = states['outlier_selection.value']
+    print("OUTLIER SELECTION VALUE", outlierSelectionValue)
+    
+    outlierSelectionOptions = states['outlier_selection.options']
+    print("OUTLIER SELECTION OPTIONS", outlierSelectionOptions)
+    
+    imputationSensorsDict = states['missing-sensordict-div.children']
+    print("IMPUTATION SENSOR DICT", imputationSensorsDict)
+    
+    outlierSensorsDict  = states['outlier-sensordict-div.children']
+    print("OUTLIER SENSOR DICT", outlierSensorsDict)
+    
+    if(outlierSensorsDict is not None):
+        if('all' in outlierSelectionValue):
+            outlierSelectionOptions = outlierSelectionOptions[1:]
+            for i in range(len(outlierSelectionOptions)):
+                print("value", outlierSelectionOptions[i]['value'])
+                value = outlierSelectionOptions[i]['value']
+                split = value.split(' & ')
+                print("split", split)
+                index  = split[0]
+                print("index", index)
+                dateTimeIndex = pd.to_datetime(index)
+                print("datetimeindex", dateTimeIndex)
+                sensor = split[1]
+                print("sensor",sensor)
+                print(originalDf.loc[dateTimeIndex, sensor])
+                originalDf.loc[dateTimeIndex, sensor] = np.nan
+                print(originalDf.loc[dateTimeIndex, sensor])
+        else:
+            for i in range(len(outlierSelectionValue)):
+                value = outlierSelectionValue[i]
+                print("value")
+                split = value.split(' & ')
+                print("split", split)
+                index  = split[0]
+                print("index", index)
+                dateTimeIndex = pd.to_datetime(index)
+                print("datetimeindex", dateTimeIndex)
+                sensor = split[1]
+                print("sensor",sensor)
+                print(originalDf.loc[dateTimeIndex, sensor])
+                originalDf.loc[dateTimeIndex, sensor] = np.nan
+                print(originalDf.loc[dateTimeIndex, sensor])
+
+    print(originalDf)        
+    if(imputationSensorsDict is not None):
+        originalDf = imputation_methods.impute_missing_values(originalDf.copy(), imputationSensorsDict, '', 0)
+    
+    csv = originalDf.to_csv()
+    
+    now = datetime.now()
+    dt_string = now.strftime("%d_%m_%Y_%H_%M_%S")
+    filename = './Reports/processed_file_'+dt_string+'.xlsx'
+    originalDf.to_excel(filename)
+    link = [dcc.Link(filename[10:],href='/tdownloads/'+ filename,refresh=False, target="_blank"),html.Br()]
+    
+    return [link]
 
 
 ''' ===================== '''

@@ -5,6 +5,7 @@ from sklearn.neighbors import LocalOutlierFactor
 from sklearn.cluster import DBSCAN, KMeans
 from pyts.approximation import SymbolicAggregateApproximation
 from scipy.stats import norm
+import warnings
 
 
 # Atypical values Detection Methods
@@ -63,7 +64,6 @@ def standard_deviation(df, parameters, sensor):
     
     lowerLimit = randomDataMean - anomalyCutOff 
     upperLimit = randomDataMean + anomalyCutOff
-    
     # list of indexes of the upper limit outliers
     upperLimitOutliers = df[df[sensor] > upperLimit].index.tolist()
     # list of indexes of the lower limit outliers
@@ -117,32 +117,34 @@ def inter_quartile_range(df, parameters, sensor):
     return df[sensor], dfWithOutliersNan[sensor]
 
 def isolation_forest(df, parameters, sensor):
-    sampleSize = df[df.columns[0]].size
-    origDf = df.copy()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sampleSize = df[df.columns[0]].size
+        origDf = df.copy()
+            
+        # transform the data serie into a numpy array then reshape it to fit on the method
+        serie = df[sensor].to_numpy().reshape(-1,1)
         
-    # transform the data serie into a numpy array then reshape it to fit on the method
-    serie = df[sensor].to_numpy().reshape(-1,1)
-    
-    #print("SERIE", serie)
-    
-    #returns a list for each observations: -1 is outlier 1 is inlier
-    classifier = IsolationForest(n_estimators=parameters[0], max_features=parameters[1], random_state = parameters[-1]).fit_predict(serie) 
-    #detectedOutliersIntegerIndexes = np.where(classifier == -1)
-    
-    origDf['integerIndex'] = classifier
-    detectedOutliersIndexes = origDf[origDf['integerIndex'] == -1].index.tolist()
-    
-    # dataframe with detected outliers
-    detectedOutliers = df.loc[detectedOutliersIndexes, sensor]
-    # list of indexes of the dataframe
-    listOfIndexes = df.index.tolist()
-    # list of indexes of all non outliers
-    nonOutliersIndex = list(set(listOfIndexes) - set(detectedOutliersIndexes))
-    #turn all outliers values into NaN
-    dfWithOutliersNan = df.copy()
-    dfWithOutliersNan.loc[detectedOutliersIndexes, sensor] = np.NaN
-    # turn all non outliers values into NaN
-    df.loc[nonOutliersIndex, sensor] = np.NaN
+        #print("SERIE", serie)
+        
+        #returns a list for each observations: -1 is outlier 1 is inlier
+        classifier = IsolationForest(n_estimators=parameters[0], max_features=parameters[1], random_state = parameters[-1]).fit_predict(serie) 
+        #detectedOutliersIntegerIndexes = np.where(classifier == -1)
+        
+        origDf['integerIndex'] = classifier
+        detectedOutliersIndexes = origDf[origDf['integerIndex'] == -1].index.tolist()
+        
+        # dataframe with detected outliers
+        detectedOutliers = df.loc[detectedOutliersIndexes, sensor]
+        # list of indexes of the dataframe
+        listOfIndexes = df.index.tolist()
+        # list of indexes of all non outliers
+        nonOutliersIndex = list(set(listOfIndexes) - set(detectedOutliersIndexes))
+        #turn all outliers values into NaN
+        dfWithOutliersNan = df.copy()
+        dfWithOutliersNan.loc[detectedOutliersIndexes, sensor] = np.NaN
+        # turn all non outliers values into NaN
+        df.loc[nonOutliersIndex, sensor] = np.NaN
         
     return df[sensor], dfWithOutliersNan[sensor]
 

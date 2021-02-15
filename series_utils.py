@@ -220,20 +220,25 @@ def generate_artificial_data(df, settings, dataType, randomSeed):
 # generate a random observation as an outlier
 def generate_outliers(df, sensor, generatedIdx, randomSeed):
     
+    #print("RANDOM SEED", randomSeed)
+    
     for idx in range(len(generatedIdx)):
-        #print("IDX", idx)
+        #print("IDX", randomSeed*(idx+1)+5)
         #randObservation = df[sensor].sample(n=1, random_state = randomSeed*idx)
         #randObservation = df[sensor].sample(n=1)
         #df.loc[idx, sensor] = random.choice([randObservation.values[0] * 3, randObservation.values[0] / 3])
         
+        random.seed(idx)
+        
         quantile95 = df[sensor].quantile(q=0.95)
         obsBiggerThanQuantile = df[sensor][df[sensor] > quantile95]
-        randObservation = obsBiggerThanQuantile.sample(n=1, random_state = randomSeed*idx)
+        randObservation = obsBiggerThanQuantile.sample(n=1, random_state = randomSeed*(idx+1)+5)
+        #print("RANDOB", randObservation.values[0])
         std = df[sensor].std()
         
         #print("randObservation", randObservation, std)
         
-        outlier = randObservation.values[0] + std
+        outlier = randObservation.values[0] + (std * random.uniform(0.3, 1))
         
         #print("OUTLIER", outlier)
         
@@ -243,8 +248,24 @@ def generate_outliers(df, sensor, generatedIdx, randomSeed):
 
     
     #print("NEWDF", newDf)
-    #print("DFSENSOR", df[sensor])
+    #print("DFSENSOR", df.loc[generatedIdx, sensor])
     return df[sensor]
+
+# generate the missing rows to the original series
+def generate_missing_rows(df):
+    # counts of the difference betweeen observations (gap distribution)
+    #res = (pd.Series(df.index[1:]) - pd.Series(df.index[:-1])).value_counts() -> DESCOMENTAR
+    x = df.iloc[:10]
+    x = x.drop([x.index[6]])
+    res = (pd.Series(x.index[1:]) - pd.Series(x.index[:-1])).value_counts()
+    print("ORIGINAL", x)
+    print("RES", res)
+    idx = pd.date_range(x.index[0], x.index[-1], freq=res.index[0])
+    print("IDX", idx)
+    x = x.reindex(idx, fill_value = np.nan)
+    print("NEXT X", x)
+    
+    return None
 
 if __name__ == '__main__':
     '''today = datetime(2018,10,1,5,45,0)

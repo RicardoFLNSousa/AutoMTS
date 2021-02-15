@@ -114,9 +114,11 @@ def get_layout(pagetitle, parameters, visuals, hidden_components=[], prefix=""):
         
     '''B: finish layout'''    
     submitstyle = {'background-color':'#6ABB97','border':'none','font-size':'14px','width':'58%','margin':5,'margin-top':20,'margin-bottom':25}
-    layout.append(html.Button('Run query', id='button',style=submitstyle))
+    layout.append(html.Button('Evaluate the pre-process methodology', id='main_button',style=submitstyle))
+    layout.append(html.Button('Pre-process the given file', id='final_button',style=submitstyle))
     layout.append(html.Div(id='dataframe-div', style={'display': 'none'}))
-    layout.append(html.Div(id='downloadfile-div', style={'display': 'none'}))
+    layout.append(html.Div(id='missing-sensordict-div', style={'display': 'none'}))
+    layout.append(html.Div(id='outlier-sensordict-div', style={'display': 'none'}))
     for param in visuals: 
         layout.append(button(prefix+param[0],param[0],param[1],param[2],None if len(param)<=3 else param[3]))
     return html.Div(layout,id='subroot',style={'width':'95%','margin':50})
